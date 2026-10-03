@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+scapy
+pyzmq
+numpy
+mkdocs
+mkdocs-material
+mkdocs-autoapi
+mkdocstrings[python]
+pytest
+pytest-cov

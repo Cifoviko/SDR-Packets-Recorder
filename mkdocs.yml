@@ -1,0 +1,17 @@
+site_name: SDR Analyzer Docs
+theme:
+  name: material
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
+          options:
+            docstring_style: google
+  - mkdocs-autoapi:
+      autoapi_dir: .
+      autoapi_add_nav_entry: "API Reference"
+
+nav:
+  - Home: index.md

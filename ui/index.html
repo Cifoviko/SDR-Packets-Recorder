@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BLE SDR Analyzer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
+        h1 { color: #333; }
+        .dashboard { display: flex; flex-direction: column; gap: 20px; }
+        .status { padding: 10px; background: #e0f7fa; border-radius: 5px; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #007bff; color: white; }
+    </style>
+</head>
+<body>
+    <h1>Bluetooth LE Live Monitor</h1>
+    
+    <div class="dashboard">
+        <div class="status" id="connection-status">Connecting to SDR Backend...</div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>MAC Address</th>
+                    <th>Payload (Hex)</th>
+                    <th>I/Q Samples Extracted</th>
+                </tr>
+            </thead>
+            <tbody id="packet-table-body">
+                <!-- Rows will be added here dynamically -->
+            </tbody>
+        </table>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
