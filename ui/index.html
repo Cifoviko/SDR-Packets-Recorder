@@ -2,37 +2,62 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BLE SDR Analyzer</title>
+    <title>SDR BLE Interceptor</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; }
-        h1 { color: #333; }
-        .dashboard { display: flex; flex-direction: column; gap: 20px; }
-        .status { padding: 10px; background: #e0f7fa; border-radius: 5px; }
-        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background-color: #007bff; color: white; }
+        :root { --bg: #f4f7f6; --primary: #2c3e50; --accent: #3498db; --card-bg: #fff; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: var(--bg); color: var(--primary); }
+        header { background: var(--primary); color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center;}
+        
+        .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .hidden { display: none !important; }
+        
+        /* Dashboard Grid */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+        .card { background: var(--card-bg); padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); cursor: pointer; transition: transform 0.2s; border-top: 4px solid var(--accent); }
+        .card:hover { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.1); }
+        .card h3 { margin: 0 0 10px 0; font-size: 1.1em; }
+        .card p { margin: 5px 0; color: #555; font-size: 0.9em; }
+        .badge { display: inline-block; background: var(--accent); color: white; padding: 3px 8px; border-radius: 12px; font-weight: bold;}
+        
+        /* Device View */
+        .btn-back { display: inline-block; margin-bottom: 20px; padding: 8px 15px; background: #e0e0e0; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-back:hover { background: #d0d0d0; }
+        
+        .msg-box { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .msg-header { display: flex; justify-content: space-between; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; }
+        .msg-body { display: flex; gap: 20px; flex-wrap: wrap;}
+        .msg-data { flex: 1; min-width: 300px; }
+        .msg-signal { flex: 1; min-width: 300px; text-align: center; }
+        
+        canvas { background: #1e1e1e; border-radius: 4px; width: 100%; height: 120px; margin-bottom: 10px;}
+        .btn-download { background: #27ae60; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; }
+        .btn-download:hover { background: #219653; }
+        code { background: #f0f0f0; padding: 2px 4px; border-radius: 3px; word-break: break-all;}
     </style>
 </head>
 <body>
-    <h1>Bluetooth LE Live Monitor</h1>
-    
-    <div class="dashboard">
-        <div class="status" id="connection-status">Connecting to SDR Backend...</div>
-        
-        <table>
-            <thead>
-                <tr>
-                    <th>Time</th>
-                    <th>MAC Address</th>
-                    <th>Payload (Hex)</th>
-                    <th>I/Q Samples Extracted</th>
-                </tr>
-            </thead>
-            <tbody id="packet-table-body">
-                <!-- Rows will be added here dynamically -->
-            </tbody>
-        </table>
+    <header>
+        <h2>📻 BLE SDR Interceptor</h2>
+        <div id="connection-status">Connecting...</div>
+    </header>
+
+    <div class="container">
+        <!-- View 1: Dashboard -->
+        <div id="view-dashboard">
+            <h3>Intercepted Devices</h3>
+            <div class="grid" id="devices-grid">
+                <!-- Cards render here -->
+            </div>
+        </div>
+
+        <!-- View 2: Device Details -->
+        <div id="view-details" class="hidden">
+            <button class="btn-back" onclick="showDashboard()">← Back to Dashboard</button>
+            <h2 id="detail-mac-title">MAC Address</h2>
+            <div id="messages-list">
+                <!-- Messages render here -->
+            </div>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>

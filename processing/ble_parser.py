@@ -1,41 +1,29 @@
 from scapy.layers.bluetooth4LE import BTLE, BTLE_ADV
-import json
+import numpy as np
 
 class BleDecoder:
-    """
-    Decoder class for raw BLE packets.
-    Uses Scapy to extract MAC addresses and payload from raw bytes.
-    """
-
     @staticmethod
-    def parse_packet(packet_bytes: bytes, iq_data: list) -> dict:
-        """
-        Parses a raw BLE packet byte array into a structured dictionary.
-
-        Args:
-            packet_bytes (bytes): Raw byte array starting from Access Address.
-            iq_data (list): List of complex I/Q samples associated with the packet.
-
-        Returns:
-            dict: Parsed data containing MAC address, payload, and IQ length.
-        """
+    def parse_packet(meta: dict, packet_bytes: bytes, iq_array: np.ndarray) -> dict:
         try:
-            # Convert raw bytes into a Scapy BTLE object
             pkt = BTLE(packet_bytes)
             
-            mac_address = "Unknown"
-            
-            # Check if the packet contains an Advertising layer
-            if pkt.haslayer(BTLE_ADV):
-                # Extract the Advertiser Address (AdvA) if present
+            # Use mock MAC if available, else extract from Scapy
+            mac_address = meta.get("mock_mac", "Unknown")
+            if mac_address == "Unknown" and pkt.haslayer(BTLE_ADV):
                 mac_address = pkt.AdvA if hasattr(pkt, 'AdvA') else "Unknown"
+
+            # Split complex array to I (real) and Q (imag) lists for JSON
+            iq_i = np.real(iq_array).tolist()
+            iq_q = np.imag(iq_array).tolist()
 
             return {
                 "status": "ok",
                 "mac": mac_address,
                 "payload_hex": packet_bytes.hex(),
-                "iq_length": len(iq_data)
+                "channel": meta.get("channel"),
+                "frequency": meta.get("frequency_mhz"),
+                "timestamp": meta.get("timestamp"),
+                "iq_data": {"I": iq_i, "Q": iq_q}
             }
         except Exception as e:
             return {"status": "error", "error_msg": str(e)}
-        

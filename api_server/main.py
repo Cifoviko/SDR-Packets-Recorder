@@ -1,4 +1,5 @@
 import asyncio
+import json
 import zmq
 import zmq.asyncio
 import numpy as np
@@ -32,15 +33,16 @@ async def zmq_listener_task():
     while True:
         multipart_msg = await socket.recv_multipart()
         
-        if len(multipart_msg) == 2:
-            packet_bytes, iq_bytes = multipart_msg
+        if len(multipart_msg) == 3:
+            meta_bytes, packet_bytes, iq_bytes = multipart_msg
+            meta = json.loads(meta_bytes.decode('utf-8'))
             
-            # Offload heavy parsing
+            # В decode_task передаем np.ndarray вместо list для производительности
+            iq_array = np.frombuffer(iq_bytes, dtype=np.complex64)
             result = await loop.run_in_executor(
                 process_pool, 
-                decode_task, 
-                packet_bytes, 
-                iq_bytes
+                BleDecoder.parse_packet, 
+                meta, packet_bytes, iq_array
             )
             
             # Broadcast to all connected UI clients if parsing was successful
