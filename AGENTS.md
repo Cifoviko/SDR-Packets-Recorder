@@ -20,8 +20,13 @@ ble/
     iqfile.py         recorded IQ file replay (.npy/.sc16/.fc32)
     synthetic.py      generated valid BLE traffic (no hardware needed)
 web/
-  app.py              FastAPI factory (routes only, state is injected)
-  static/index.html   web UI
+  app.py              FastAPI factory (routes only, state is injected):
+                      /api/devices - devices aggregated by MAC
+                      /api/devices/{mac}/packets - packets of one device
+                      /api/iq/{file} - raw IQ samples as JSON (for plotting)
+                      /api/control/{pause,resume,reset} - capture control
+  static/index.html   web UI: main screen (device list + pause/reset buttons)
+                      and per-device screen with raw signal plots
 scripts/
   capture_iq.py       record raw IQ from the B210
   validate_dataset.py offline DSP validation over dataset/*.npy

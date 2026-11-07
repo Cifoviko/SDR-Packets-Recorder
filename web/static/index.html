@@ -4,83 +4,293 @@
     <meta charset="UTF-8">
     <title>BLE Passive Identifier</title>
     <style>
+        * { box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; background: #f4f4f9; }
         h2 { margin-bottom: 4px; }
-        .stats { color: #555; margin-bottom: 16px; font-size: 0.95em; }
+        a { color: #0056b3; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .stats { color: #555; margin-bottom: 12px; font-size: 0.95em; }
         .stats b { color: #0056b3; }
         .err { color: #b00020; }
+        .toolbar { margin-bottom: 16px; }
+        .btn-ctl { padding: 7px 14px; border: none; border-radius: 4px; color: white; font-size: 0.9em; cursor: pointer; margin-right: 8px; }
+        .btn-pause { background: #d39e00; }
+        .btn-pause:hover { background: #b8860b; }
+        .btn-reset { background: #c82333; }
+        .btn-reset:hover { background: #a71d2a; }
+        .hint { color: #999; font-size: 0.85em; }
+
+        /* device tiles */
+        .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
+        .tile { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.15); padding: 14px 16px; cursor: pointer; }
+        .tile:hover { box-shadow: 0 2px 8px rgba(0, 86, 179, 0.25); }
+        .tile .mac { font-family: monospace; font-weight: bold; font-size: 1.05em; color: #0056b3; margin-bottom: 10px; word-break: break-all; }
+        .tile .row { display: flex; justify-content: space-between; font-size: 0.88em; padding: 2px 0; }
+        .tile .row .k { color: #777; }
+        .tile .row .v { font-family: monospace; font-weight: 600; }
+
+        /* packet table */
         table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-        th, td { padding: 10px; border: 1px solid #ddd; text-align: left; font-size: 0.92em; }
+        th, td { padding: 8px 10px; border: 1px solid #ddd; text-align: left; font-size: 0.9em; vertical-align: top; }
         th { background-color: #343a40; color: white; }
-        .mac { font-family: monospace; font-weight: bold; color: #0056b3; }
         .payload { font-family: monospace; font-size: 0.85em; color: #555; word-break: break-all; }
         .tag { display: inline-block; padding: 3px 8px; border-radius: 4px; background: #e9ecef; font-size: 0.82em; font-weight: bold; white-space: nowrap; }
-        .btn { padding: 5px 10px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 0.85em; white-space: nowrap; }
+        .btn { padding: 4px 9px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 0.82em; white-space: nowrap; }
         .btn:hover { background: #218838; }
+        .sig-cell { padding: 4px 10px 10px; background: #fafbfc; }
+        .sig-label { font-size: 0.8em; color: #777; margin: 2px 0 4px; }
+        canvas { width: 100%; height: 120px; background: white; border: 1px solid #e0e0e0; border-radius: 4px; display: block; }
+        .back { font-size: 1.05em; margin-bottom: 8px; display: inline-block; }
     </style>
 </head>
 <body>
 
     <h2>BLE Passive Identifier</h2>
     <p class="stats" id="stats">Загрузка…</p>
+    <div class="toolbar">
+        <button class="btn-ctl btn-pause" id="btn-pause" onclick="togglePause()">Приостановить</button>
+        <button class="btn-ctl btn-reset" onclick="resetData()">Сброс данных</button>
+    </div>
 
-    <table>
-        <thead>
-            <tr>
-                <th>Время</th>
-                <th>Канал</th>
-                <th>Тип PDU</th>
-                <th>MAC</th>
-                <th>Длина</th>
-                <th>Данные (Hex)</th>
-                <th>Сырые IQ</th>
-            </tr>
-        </thead>
-        <tbody id="table-body"></tbody>
-    </table>
+    <div id="view-main">
+        <div class="tiles" id="tiles"></div>
+        <p class="hint">Порядок плиток фиксирован (по времени первого появления). Нажмите на плитку, чтобы открыть пакеты устройства.</p>
+    </div>
+
+    <div id="view-device" style="display:none">
+        <a class="back" href="#/">← Ко всем устройствам</a>
+        <h3 id="device-title"></h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Время</th>
+                    <th>Канал</th>
+                    <th>Тип PDU</th>
+                    <th>Длина</th>
+                    <th>Мощность</th>
+                    <th>Данные (Hex)</th>
+                    <th>Сырые IQ</th>
+                </tr>
+            </thead>
+            <tbody id="packets-body"></tbody>
+        </table>
+    </div>
 
     <script>
-        async function refresh() {
-            try {
-                const [msgRes, statRes] = await Promise.all([
-                    fetch('/api/messages'),
-                    fetch('/api/stats')
-                ]);
-                const messages = await msgRes.json();
-                const st = await statRes.json();
+        let refreshTimer = null;
+        let currentDevice = null;
+        const IQ_POINTS = 512;
 
+        // ------------------------------------------------------------------
+        // Routing: #/ = device list, #/device/<mac> = packets of one device
+        // ------------------------------------------------------------------
+        function route() {
+            const h = location.hash;
+            if (h.startsWith('#/device/')) {
+                currentDevice = decodeURIComponent(h.slice('#/device/'.length));
+                showDeviceView();
+            } else {
+                currentDevice = null;
+                showMainView();
+            }
+        }
+        window.onhashchange = route;
+
+        function showMainView() {
+            document.getElementById('view-main').style.display = '';
+            document.getElementById('view-device').style.display = 'none';
+            startPolling(refreshDevices, 1000);
+        }
+
+        function showDeviceView() {
+            document.getElementById('view-main').style.display = 'none';
+            document.getElementById('view-device').style.display = '';
+            document.getElementById('device-title').textContent = 'Устройство ' + currentDevice;
+            startPolling(refreshPackets, 2000);
+        }
+
+        function startPolling(fn, ms) {
+            if (refreshTimer) clearInterval(refreshTimer);
+            fn();
+            refreshTimer = setInterval(fn, ms);
+        }
+
+        function fmtTime(ts) {
+            return new Date(ts * 1000).toLocaleTimeString();
+        }
+
+        function fmtAgo(ts) {
+            const s = Math.max(0, Date.now() / 1000 - ts);
+            return s < 90 ? `${s.toFixed(0)} с назад` : `${(s / 60).toFixed(1)} мин назад`;
+        }
+
+        function fmtInterval(sec) {
+            if (sec == null) return '—';
+            return sec < 1 ? `${(sec * 1000).toFixed(0)} мс` : `${sec.toFixed(1)} с`;
+        }
+
+        // ------------------------------------------------------------------
+        // Controls
+        // ------------------------------------------------------------------
+        async function togglePause() {
+            const st = await (await fetch('/api/stats')).json();
+            await fetch(st.paused ? '/api/control/resume' : '/api/control/pause', { method: 'POST' });
+            refreshStats();
+        }
+
+        async function resetData() {
+            if (!confirm('Удалить все перехваченные пакеты и IQ-файлы?')) return;
+            await fetch('/api/control/reset', { method: 'POST' });
+            if (currentDevice) location.hash = '#/';
+            refreshStats();
+        }
+
+        // ------------------------------------------------------------------
+        // Stats line
+        // ------------------------------------------------------------------
+        async function refreshStats() {
+            try {
+                const st = await (await fetch('/api/stats')).json();
                 const el = document.getElementById('stats');
+                const btn = document.getElementById('btn-pause');
+                btn.textContent = st.paused ? 'Возобновить' : 'Приостановить';
                 if (!st.running) {
                     el.innerHTML = `<span class="err">Источник не запущен.</span> ` +
                         `Источник: ${st.source || '—'} · Ошибки: ${(st.errors || []).join('; ') || 'нет данных'}`;
                 } else {
+                    const state = st.paused ? ' · <span class="err">пауза</span>' : '';
                     el.innerHTML = `Источник: ${st.source} · канал <b>${st.channel}</b> · ` +
-                        `всплесков: <b>${st.bursts}</b> · декодировано (CRC OK): <b>${st.decoded}</b>` +
-                        (st.dropped ? ` · <span class="err">пропущено буферов: ${st.dropped}</span>` : '');
+                        `всплесков: <b>${st.bursts}</b> · декодировано (CRC OK): <b>${st.decoded}</b>${state}` +
+                        (st.dropped ? ` · <span class="err">пропущено: ${st.dropped}</span>` : '');
                 }
+            } catch (err) { console.error(err); }
+        }
+        setInterval(refreshStats, 1000);
 
-                const tbody = document.getElementById('table-body');
+        // ------------------------------------------------------------------
+        // Main view: device tiles (fixed order: by first appearance)
+        // ------------------------------------------------------------------
+        async function refreshDevices() {
+            try {
+                const devices = await (await fetch('/api/devices')).json();
+                const host = document.getElementById('tiles');
+                if (!devices.length) {
+                    host.innerHTML = '<p class="hint">Пока нет устройств.</p>';
+                    return;
+                }
+                host.innerHTML = '';
+                devices.forEach(d => {
+                    const tile = document.createElement('div');
+                    tile.className = 'tile';
+                    tile.onclick = () => location.hash = '#/device/' + encodeURIComponent(d.mac);
+                    tile.innerHTML = `
+                        <div class="mac">${d.mac}</div>
+                        <div class="row"><span class="k">Первый контакт</span><span class="v">${fmtTime(d.first_seen)}</span></div>
+                        <div class="row"><span class="k">Последний контакт</span><span class="v">${fmtTime(d.last_seen)} (${fmtAgo(d.last_seen)})</span></div>
+                        <div class="row"><span class="k">Всего пакетов</span><span class="v">${d.packets}</span></div>
+                        <div class="row"><span class="k">Средний интервал</span><span class="v">${fmtInterval(d.avg_interval)}</span></div>
+                        <div class="row"><span class="k">Мощность сигнала</span><span class="v">${d.avg_power_db.toFixed(1)} дБ</span></div>
+                    `;
+                    host.appendChild(tile);
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        // ------------------------------------------------------------------
+        // Device view: packets with always-visible signal plots
+        // ------------------------------------------------------------------
+        async function refreshPackets() {
+            try {
+                const url = '/api/devices/' + encodeURIComponent(currentDevice) +
+                            '/packets?with_iq=1&max_points=' + IQ_POINTS;
+                const packets = await (await fetch(url)).json();
+                const tbody = document.getElementById('packets-body');
                 tbody.innerHTML = '';
-                messages.forEach(msg => {
-                    const date = new Date(msg.timestamp * 1000).toLocaleTimeString();
+                if (!packets.length) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="hint">Пакетов нет.</td></tr>';
+                    return;
+                }
+                packets.forEach(msg => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td>${date}</td>
+                        <td>${fmtTime(msg.timestamp)}</td>
                         <td>${msg.channel} (${(msg.frequency / 1e6).toFixed(0)} МГц)</td>
                         <td><span class="tag">${msg.pdu_type}</span></td>
-                        <td class="mac">${msg.mac}</td>
                         <td>${msg.length}</td>
+                        <td>${msg.power_db != null ? msg.power_db.toFixed(1) : '—'}</td>
                         <td class="payload">${msg.payload || '<i>пусто</i>'}</td>
-                        <td><a href="${msg.iq_file}" class="btn" download>.npy (${msg.iq_samples})</a></td>
+                        <td><a href="${msg.iq_file}" class="btn" download>.npy</a></td>
                     `;
+                    const sigRow = document.createElement('tr');
+                    const sigCell = document.createElement('td');
+                    sigCell.colSpan = 7;
+                    sigCell.className = 'sig-cell';
+                    if (msg.i) {
+                        sigCell.innerHTML = `<div class="sig-label">Сырой радио сигнал: ${msg.n_total} отсчётов` +
+                            (msg.n_total > msg.i.length ? ` (прорежено до ${msg.i.length})` : '') +
+                            ` · синяя — I, красная — Q, заливка — амплитуда</div>`;
+                        const canvas = document.createElement('canvas');
+                        sigCell.appendChild(canvas);
+                        requestAnimationFrame(() => drawSignal(canvas, msg.i, msg.q));
+                    } else {
+                        sigCell.innerHTML = '<div class="sig-label err">IQ-файл недоступен</div>';
+                    }
+                    sigRow.appendChild(sigCell);
                     tbody.appendChild(tr);
+                    tbody.appendChild(sigRow);
                 });
-            } catch (err) {
-                console.error('Ошибка загрузки:', err);
-            }
+            } catch (err) { console.error(err); }
         }
-        setInterval(refresh, 1000);
-        refresh();
+
+        function drawSignal(canvas, iArr, qArr) {
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.clientWidth || (canvas.parentNode.clientWidth - 22) || 600;
+            const h = 120;
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+
+            const n = iArr.length;
+            const amp = iArr.map((v, k) => Math.hypot(v, qArr[k]));
+            const maxAmp = Math.max(...amp, 1e-9);
+            const pad = 6;
+            const x = k => pad + (w - 2 * pad) * k / Math.max(n - 1, 1);
+
+            // amplitude envelope (filled)
+            ctx.beginPath();
+            ctx.moveTo(x(0), h - pad);
+            amp.forEach((a, k) => ctx.lineTo(x(k), h - pad - (h - 2 * pad) * a / maxAmp));
+            ctx.lineTo(x(n - 1), h - pad);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(0, 86, 179, 0.12)';
+            ctx.fill();
+
+            // zero line
+            ctx.strokeStyle = '#ddd';
+            ctx.beginPath();
+            ctx.moveTo(pad, h - pad);
+            ctx.lineTo(w - pad, h - pad);
+            ctx.stroke();
+
+            // I and Q traces (scaled to their own max for readability)
+            const maxIQ = Math.max(Math.max(...iArr.map(Math.abs)), Math.max(...qArr.map(Math.abs)), 1e-9);
+            const trace = (arr, color) => {
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1.2;
+                arr.forEach((v, k) => {
+                    const y = h - pad - (h - 2 * pad) * (v / maxIQ + 1) / 2;
+                    k === 0 ? ctx.moveTo(x(k), y) : ctx.lineTo(x(k), y);
+                });
+                ctx.stroke();
+            };
+            trace(iArr, '#0056b3');
+            trace(qArr, '#c82333');
+        }
+
+        route();
+        refreshStats();
     </script>
 </body>
 </html>

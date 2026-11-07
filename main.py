@@ -76,7 +76,7 @@ def main():
 
     threading.Thread(target=processor.run, daemon=True).start()
 
-    app = create_app(store, stats, writer, config.DATASET_DIR, config.STATIC_DIR)
+    app = create_app(store, stats, writer, processor, config.DATASET_DIR, config.STATIC_DIR)
     print(f"[*] Web UI: http://localhost:{args.port}  (source: {source.description})")
     # access_log=False: per-request logging was measured to starve the UHD recv path
     uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info", access_log=False)

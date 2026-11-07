@@ -21,6 +21,8 @@ class PacketStore:
     def __init__(self, cap=500):
         self._cap = cap
         self._items = []
+        self._device_order = []      # MACs in order of first-ever appearance
+        self._device_index = set()
         self._lock = threading.Lock()
 
     def add(self, msg):
@@ -28,10 +30,66 @@ class PacketStore:
             self._items.append(msg)
             if len(self._items) > self._cap:
                 del self._items[: len(self._items) - self._cap]
+            mac = msg["mac"]
+            if mac not in self._device_index:
+                self._device_index.add(mac)
+                self._device_order.append(mac)
 
     def latest(self, n=200):
         with self._lock:
             return list(reversed(self._items[-n:]))
+
+    def clear(self):
+        with self._lock:
+            self._items.clear()
+            self._device_order.clear()
+            self._device_index.clear()
+
+    def devices(self):
+        """Aggregate packets into per-device summaries.
+
+        Sorted by the order in which devices were first observed, so tiles keep
+        fixed positions on screen and newly discovered devices are appended at
+        the end. Order survives ring-buffer eviction and resets on clear().
+        """
+        with self._lock:
+            grouped = {}
+            for m in self._items:
+                d = grouped.setdefault(m["mac"], {
+                    "mac": m["mac"],
+                    "packets": 0,
+                    "first_seen": m["timestamp"],
+                    "last_seen": m["timestamp"],
+                    "pdu_types": set(),
+                    "channels": set(),
+                    "last_payload": "",
+                    "power_sum": 0.0,
+                })
+                d["packets"] += 1
+                d["first_seen"] = min(d["first_seen"], m["timestamp"])
+                d["last_seen"] = max(d["last_seen"], m["timestamp"])
+                d["pdu_types"].add(m["pdu_type"])
+                d["channels"].add(m["channel"])
+                d["last_payload"] = m["payload"]
+                d["power_sum"] += m.get("power_db", -120.0)
+            out = []
+            for d in grouped.values():
+                n = d["packets"]
+                d["avg_interval"] = (d["last_seen"] - d["first_seen"]) / (n - 1) if n > 1 else None
+                d["avg_power_db"] = d["power_sum"] / n
+                del d["power_sum"]
+                d["pdu_types"] = sorted(d["pdu_types"])
+                d["channels"] = sorted(d["channels"])
+                out.append(d)
+            out.sort(key=lambda d: self._device_order.index(d["mac"]))
+            return out
+
+    def by_mac(self, mac, limit=300):
+        """All packets of one device, newest first."""
+        with self._lock:
+            items = [m for m in self._items if m["mac"] == mac]
+            items.sort(key=lambda m: m["timestamp"])
+            return list(reversed(items[-limit:]))
 
     def __len__(self):
         with self._lock:
@@ -45,6 +103,7 @@ class Stats:
         self._lock = threading.Lock()
         self._d = {
             "running": False,
+            "paused": False,
             "source": "",
             "channel": 37,
             "bursts": 0,         # energy bursts detected
@@ -86,6 +145,20 @@ class Processor:
         self.chunk = chunk
         self.guard = guard
         self.sps = sps
+        self._paused = threading.Event()
+
+    def pause(self):
+        """Pause capture: incoming IQ keeps being drained but is discarded."""
+        self._paused.set()
+        self.stats.set("paused", True)
+
+    def resume(self):
+        self._paused.clear()
+        self.stats.set("paused", False)
+
+    @property
+    def paused(self):
+        return self._paused.is_set()
 
     def run(self):
         """Blocking main loop. Runs until the source is exhausted or raises."""
@@ -107,6 +180,9 @@ class Processor:
                 buf = pending[0] if len(pending) == 1 else np.concatenate(pending)
                 pending = []
                 pending_len = 0
+
+                if self._paused.is_set():
+                    continue                            # discard while paused
 
                 consumed = self._process_window(buf, item.channel, item.frequency)
                 if consumed:
@@ -143,6 +219,7 @@ class Processor:
     def _save_packet(self, iq, parsed, channel, freq):
         ts = time.time()
         fname = make_dataset_filename(parsed, ts)
+        mean_power = float(np.mean(np.abs(iq) ** 2))
         msg = {
             "timestamp": ts,
             "channel": channel,
@@ -151,6 +228,7 @@ class Processor:
             "mac": parsed["mac"],
             "length": parsed["length"],
             "payload": parsed["payload"],
+            "power_db": 10.0 * np.log10(mean_power + 1e-12),
             "iq_file": f"/dataset/{fname}",
             "iq_samples": int(len(iq)),
         }
